@@ -1,0 +1,226 @@
+#! /usr/bin/env python
+
+#
+# Super simple backup via tarsnap;
+# - Do daily, weekly, monthly backup with N sets per type
+# - Completely driven by commandline (no config file mess)
+# - Deletes stale archives in the tarsnap cloud
+#
+# Usage: $0 keyfile archive-name daily|weekly|monthly [max] dir [dir..]
+#
+# Author: Sudhi Herle <sudhi-at-herle.net>
+# (c) 2015 Sudhi Herle
+# License: GPLv2
+#
+
+import os, sys
+import os.path, datetime
+import argparse, subprocess
+from dateutil import parser
+from os.path  import basename
+
+Z        = basename(sys.argv[0])
+Tarsnap  = "tarsnap"
+Dryrun   = False
+Verbose  = False
+Cachedir = "" # Use whatever default Tarsnap uses
+__doc__  = """%s - Do a tarsnap backup of one or more directories""" % Z
+Epilog   = """Examples:
+=========
+Backup dirA, dirB identified by 'work' and keep last 7 days worth of
+daily backups:
+  %s /path/to/Keyfile.key work daily 7 dirA dirB
+
+Backup '10', '20' identified by 'photos' and keep last 10 weeks worth of
+weekly backups (i.e., the first '10' is the number of backup sets
+and the second '10' is the directory name):
+  %s /path/to/Keyfile.key photos weekly 10 10 20
+
+""" % (Z, Z)
+
+# Default # of sets to keep for each backup type.
+Max     = { 'hourly': 24,
+            'daily': 10,
+            'weekly': 6,
+            'monthly': 14,
+          }
+
+def warn(fmt, *args):
+    s = "%s: %s" % (Z, fmt)
+    if args:                 s  = s % args
+    if not s.endswith('\n'): s += '\n'
+
+    sys.stderr.write(s)
+    sys.stderr.flush()
+
+def die(fmt, *args):
+    warn(fmt, *args)
+    sys.exit(1)
+
+def verbose(fmt, *args):
+    global Verbose
+
+    if Verbose:
+        s = fmt % args if args else fmt
+        if not s.endswith('\n'):  s += '\n'
+        sys.stdout.write(s)
+
+class tarsnap:
+    """A configured instance of the tarsnap command"""
+
+    def __init__(self, keyfile, cachedir, verb=False):
+        global Tarsnap
+
+        self.keyfile  = keyfile
+        self.baseargs = [Tarsnap, '--keyfile', keyfile]
+        if len(cachedir) > 0:
+            self.baseargs += ['--cachedir', cachedir]
+
+    def run(self, xargs):
+        """Run the Tarsnap command and return the output"""
+        global Dryrun
+
+        args = self.baseargs + xargs
+        cmd  = ' '.join(args)
+        verbose("# %s", cmd)
+        try:
+            z = subprocess.check_output(args)
+        except Exception, ex:
+            die("%s failed\n%s", cmd, str(ex))
+
+        return z.split('\n')
+
+    def list_archives(self, pref=None):
+        """List archives starting with 'pref'"""
+
+        l = self.run(["--list-archives", "-v"])
+        a = []
+        for e in l:
+            if len(e) == 0: continue
+            #print "# [L] %s" % e
+            v = e.split()
+            if len(v) != 3:
+                warn("Archive entry '%s' has no timestamp!", e)
+                continue
+
+            z = v[1] + ' ' + v[2]
+            d = parser.parse(z)
+            n = v[0]
+            t = (n, d)
+            if pref:
+                if n.startswith(pref):
+                    a.append(t)
+            else:
+                a.append(t)
+
+        # Now sort the archive from newest to oldest
+        a.sort(reverse=True, key=lambda x: x[1])
+        return a
+
+    def delete_archives(self, rm):
+        """Delete all archives in 'rm'"""
+        global Dryrun
+
+        if Dryrun:
+            for f in rm:
+                verbose("tarsnap --keyfile %s -d %s", self.keyfile, f)
+
+            return
+
+        # XXX Gah! No interface for deleting multiple archives at once
+        for f in rm:
+            self.run(['-d', '-f', f])
+
+    def backup(self, pref, dirs):
+        """Backup 'dirs' into archive name 'nm'."""
+        global Dryrun
+
+        dd   = datetime.datetime.now().strftime("%Y-%b-%d-%H-%M")
+        nm   = "%s-%s" % (pref, dd)
+        args = ["-c", "-f", nm] + dirs
+
+        if Dryrun:
+            cmd  = ' '.join(args)
+            verbose("tarsnap --keyfile %s %s", self.keyfile, cmd)
+            return
+
+        self.run(args)
+
+
+def main():
+    global Verbose, Dryrun, Epilog
+
+    usage = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
+    parser = argparse.ArgumentParser(description=__doc__, usage=usage,
+                            epilog=Epilog,
+                            formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("-n", "--dry-run", dest='dryrun', action="store_true",
+                      default=False,
+                      help="Do a dry-run, don't actually commit things [False]")
+    parser.add_argument("-v", "--verbose", dest='verbose', action="store_true",
+                      default=False,
+                      help="Show verbose progress messages [False]")
+    parser.add_argument("-c", "--cachedir", dest='cachedir', default="", metavar='D',
+                        help="Use 'D' as the tarsnap cache dir []")
+
+    parser.add_argument("keyfile", nargs=1, metavar="Keyfile", help="Tarsnap keyfile")
+    parser.add_argument("archive", nargs=1, metavar="Archive", help="The tarsnap archive prefix")
+    parser.add_argument("action",  choices=['hourly', 'daily', 'weekly', 'monthly'],
+                        metavar="type",
+                         help="Backup type; one of 'hourly', 'daily', 'weekly' or 'monthly'")
+
+    parser.add_argument("dirs", nargs="+", metavar="Dir", help="One or more directories to backup")
+
+    # Number of sets to keep
+    keep = 0
+    a    = parser.parse_args()
+    typ  = a.action
+
+
+    # If the first dir argument is a integer, we treat it as the
+    # number of backup sets to keep.
+    try:
+        k = int(a.dirs[0])
+        keep = k
+        dirs = a.dirs[1:]
+    except:
+        dirs = a.dirs
+
+    if len(dirs) == 0:
+        die("Missing directories to backup")
+
+    Dryrun  = a.dryrun
+    Verbose = True if Dryrun else a.verbose
+
+    if len(a.cachedir) > 0:
+        if not os.path.isdir(a.cachedir):
+            os.makedirs(a.cachedir, 0700)
+
+    if keep == 0: keep = Max[typ]
+
+    key  = a.keyfile[0]
+    ts   = tarsnap(key, a.cachedir, a.verbose)
+    arch = "%s-%s" % (a.archive[0], typ)
+        
+    #print "typ=%s keeping %d sets, verbose=%s, dryrun=%s" % (typ, keep, Verbose, Dryrun)
+
+    verbose("tarsnap %s %sbackup of '%s' [keeping latest %d sets]",
+            typ, "Dryrun-" if Dryrun else "", a.archive[0], keep)
+
+    l = ts.list_archives(arch)
+
+    # Now, we keep the last N backups and delete the rest
+    if len(l) >= keep:
+        rm = [ x[0] for x in l[keep:] ]
+        rms = ', '.join(rm)
+        #print "# RM %s" % rms
+        ts.delete_archives(rm)
+
+    #print "# Now doing tarsnap backup"
+    # Now, do the backup
+    ts.backup(arch, dirs)
+    
+
+main()
+
+# EOF
