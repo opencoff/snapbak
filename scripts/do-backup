@@ -1,0 +1,252 @@
+#! /bin/bash
+
+#
+# Wrapper to do all the things needed to backup stuff to/on my
+# macbook pro
+#
+# Sudhi Herle <sudhi@herle.net>
+# License: GPLv2
+# Jan 28, 2014
+#
+# Usage: $0 daily|weekly|monthly
+
+# On my MBP, I backup the following:
+#
+#  - /etc
+#  - /opt/local/etc
+#  - macports package list
+#  - my dotfiles
+#
+# Once invoked, this script will backup everything above in
+# sequence.
+#
+# Errors and other messages are logged to syslog with the prefix
+# '$1-backup' [e.g., daily-backup, 'weekly-backup' etc.]
+
+
+# ---- Configuration Vars ---
+HOME=/Users/sherle
+Backup_root=$HOME/osx-backup/osx
+
+PATH="/opt/local/bin:/opt/local/sbin:/opt/local/pybin:/Users/sherle/scripts:/Users/sherle/bin:/sbin:/usr/sbin:/usr/local/bin:/usr/bin:/bin:/opt/X11/bin"
+export HOME PATH
+
+me=`id -u`
+if [ $me -ne 0 ]; then
+    exec sudo $0 "$@"
+fi
+
+# Tarsnap key
+Node=`hostname -s`
+Tkey=$HOME/etc/tarsnap/$Node.key
+Today=`date +'%Y-%b-%d'`
+Logfile=/tmp/backup.log
+
+# uncomment the next line to test out stuff
+#Backup_root=/tmp/backup
+#e=echo
+
+
+# -- don't modify anything below --
+
+tty -s; zz=$?
+case "$zz" in
+    0)
+        verbose() {
+            echo "$@"
+            return 0
+        }
+        ;;
+    *) 
+        verbose() {
+            return 0
+        }
+        ;;
+esac
+
+# Backup Policy: Number of backups of each type to keep
+# XXX Put this in a separate file?
+typ=$1
+case "x$typ" in
+    xdaily)   nbackups=10 ;;
+    xweekly)  nbackups=6  ;;
+    xmonthly) nbackups=14  ;;
+
+    x) echo "Usage: $0 daily|weekly|monthly" 1>&2
+       exit 1;;
+
+    *) echo "$0: Unknown backup type $typ" 1>&2
+       exit 1;;
+esac
+
+
+#
+# writelog message...
+#   Write a log to syslog
+#
+logpref="$typ-backup"
+writelog() {
+    $e logger -p "daemon.info" -t $logpref "$@"
+    verbose "$@"
+
+    echo  "`date`: $@" >> $Logfile
+}
+
+
+
+id=`id -n -u`
+if [ $id != "root" ]; then
+    writelog "Not running as root. Backups aborted!"
+    exit 1
+fi
+#env
+uname=`uname`
+if [ $uname != "Darwin" ]; then
+    writelog "$0 invoked on non-Darwin system"
+    echo "$0: This script is not for $uname systems.." 1>&2
+    exit 1
+fi
+
+# First and foremost, wait for network to be functioning and reachable.
+waitnet() {
+    local rr
+    local n=0
+    local z=0
+
+    while [ $n -lt 5 ]; do
+        n=$(( $n + 1 ))
+        rr=`scutil -r www.tarsnap.com`
+        if [ "$rr" != "Reachable" ]; then
+            writelog "Network not ready. Waiting for it to work .."
+            sleep 5
+            ipconfig waitall
+        else
+            writelog "Network is functional."
+            z=1
+            break
+        fi
+    done
+
+    if [ $z -ne 1 ]; then
+        writelog "No network reachable. Aborting $0"
+        exit 1
+    fi
+
+    return 0
+}
+
+
+# Global var to hold dirs that ought to be removed
+RM_dirs=""
+
+
+# Rotate a bunch of dirs such that only most recent 'n' dirs remain
+# rotate_dir DIR NBACKUPS
+rotate_dir() {
+    local dir=$1
+    local count=$2
+
+    #if [ ! -d $dir ]; then
+        #$e mkdir -p $dir
+        #return 0
+    #fi
+
+    verbose "Rotating $dir [max $count] .."
+    local n=$count
+    while [ $n -gt 0 ]; do
+        local prev=$(( $n - 1 ))
+        local d=$dir.$n
+        local pd=$dir.$prev
+
+        if [ -d $d ]; then
+            local nn=$d.$RANDOM
+            RM_dirs="$RM_dirs $nn"
+
+            verbose "  # rm -rf $d [mv $d $nn]"
+            $e mv $d $nn
+            #$e rm -rf $d
+        fi
+        if [ -d $pd ]; then
+            verbose "  # mv $pd $d"
+            $e mv $pd $d
+        fi
+        n=$prev
+    done
+
+    return 0
+}
+
+
+
+
+# backup my mbp
+# backup_mbp BACKUP_BASE_DIR
+backup_mbp() {
+    local bdir=$1
+    shift
+
+    local ptmp=/tmp/pkg_file.$RANDOM
+    local atmp=/tmp/etc.$RANDOM
+    local btmp=/tmp/oetc.$RANDOM
+    local ctmp=/tmp/dotf.$RANDOM
+    local rtmp=/tmp/req_pkgs.$RANDOM
+    local machine=`uname -n`
+
+    $e mkdir -p $bdir
+
+
+    writelog "Backing up essential system files of $machine to $bdir ..."
+
+    port installed | gzip -9 > $ptmp
+    port installed requested | gzip -9 > $rtmp
+    tar -H -cf - /etc | gzip -9 > $atmp
+    tar -H -cf - /opt/local/etc | gzip -9 > $btmp
+
+    #if [ -f $HOME/__OSX_dotfiles ]; then
+        #tar -H -cf - `cat $HOME/__OSX_dotfiles` | gzip -9 > $ctmp
+    #fi
+
+    $e cp $ptmp $bdir/macports.installed.gz
+    $e cp $atmp $bdir/sysetc.tar.gz
+    $e cp $btmp $bdir/optlocaletc.tar.gz
+    $e cp $rtmp $bdir/macports.install-requested.gz
+    #$e cp $ctmp $bdir/osx-dotfiles.tar.gz
+
+    rm -rf $ptmp $atmp $btmp $ctmp $rtmp $RM_dirs
+}
+
+
+#set -x
+
+writelog "## Begin Backup ##"
+
+# Wait for network to be available
+waitnet
+
+rotate_dir $Backup_root/$typ $nbackups
+mkdir -p   $Backup_root/$typ.0
+
+backup_mbp $Backup_root/$typ.0
+
+
+Tbackup="$Node"
+Tworkbak="$Node-work"
+Tcache=$HOME/tarsnap
+
+writelog "Backing up conf to tarsnap .."
+snapbak -v -c $Tcache $Tkey $Tbackup  $typ $nbackups $Backup_root/$typ.0 2>&1 >> $Logfile
+if [ $? -ne 0 ]; then
+    writelog "conf tarsnap failed!"
+fi
+
+#writelog "Backing up workdir to tarsnap .."
+#snapbak -v -c $Tcache $Tkey $Tworkbak $typ $nbackups $HOME/w/active-dev 2>&1 >> $Logfile 
+#if [ $? -ne 0 ]; then
+#    writelog "workdir tarsnap failed!"
+#fi
+
+writelog "## End Backup ##"
+exit 0
+
+
+# vim: expandtab:sw=4:ts=4:tw=72:

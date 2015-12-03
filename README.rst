@@ -66,8 +66,8 @@ Examples
   In the above example, the first ``10`` is the number of backup sets
   and the second *10* is the directory name.
 
-- Do a monthly directories *10*, *20* identified by the prefix ``foo`` and
-  use the program defaults for number of retained backups::
+- Do a monthly backup of directories *10*, *20* identified by the prefix ``foo``
+  and use the program defaults for number of retained backups::
 
       snapbak /path/to/Keyfile.key foo monthly - 10 20
 
