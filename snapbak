@@ -23,18 +23,23 @@ Z        = basename(sys.argv[0])
 Tarsnap  = "tarsnap"
 Dryrun   = False
 Verbose  = False
+Version  = '0.4'
 Cachedir = "" # Use whatever default Tarsnap uses
 __doc__  = """%s - Do a tarsnap backup of one or more directories""" % Z
 Epilog   = """Examples:
 =========
 Backup dirA, dirB identified by 'work' and keep last 7 days worth of
 daily backups:
+
   %s /path/to/Keyfile.key work daily 7 dirA dirB
 
-Backup '10', '20' identified by 'photos' and keep last 10 weeks worth of
-weekly backups (i.e., the first '10' is the number of backup sets
-and the second '10' is the directory name):
+Backup directories '10', '20' identified by 'photos' and keep last 10
+weeks worth of weekly backups:
+
   %s /path/to/Keyfile.key photos weekly 10 10 20
+
+The first '10' is the number of backup sets and the second '10'
+is the directory name.
 
 """ % (Z, Z)
 
@@ -72,7 +77,11 @@ class tarsnap:
         global Tarsnap
 
         self.keyfile  = keyfile
-        self.baseargs = [Tarsnap, '--keyfile', keyfile]
+        self.baseargs = [Tarsnap]
+
+        if len(keyfile) > 0:
+            self.baseargs += ['--keyfile', keyfile]
+
         if len(cachedir) > 0:
             self.baseargs += ['--cachedir', cachedir]
 
@@ -89,6 +98,10 @@ class tarsnap:
             die("%s failed\n%s", cmd, str(ex))
 
         return z.split('\n')
+
+    def version(self):
+        l = self.run(["--version"])
+        return l[0].strip()
 
     def list_archives(self, pref=None):
         """List archives starting with 'pref'"""
@@ -148,7 +161,11 @@ class tarsnap:
 
 
 def main():
-    global Verbose, Dryrun, Epilog
+    global Verbose, Dryrun, Epilog, Version, Z
+
+    xts = tarsnap("", "", False)
+    tsv = xts.version()
+    ver = "%s v%s [%s]" % (Z, Version, tsv)
 
     usage = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
     parser = argparse.ArgumentParser(description=__doc__, usage=usage,
@@ -162,6 +179,8 @@ def main():
                       help="Show verbose progress messages [False]")
     parser.add_argument("-c", "--cachedir", dest='cachedir', default="", metavar='D',
                         help="Use 'D' as the tarsnap cache dir []")
+    parser.add_argument("-V",  action="version", version=ver)
+
 
     parser.add_argument("keyfile", nargs=1, metavar="Keyfile", help="Tarsnap keyfile")
     parser.add_argument("archive", nargs=1, metavar="Archive", help="The tarsnap archive prefix")
@@ -175,6 +194,7 @@ def main():
     keep = 0
     a    = parser.parse_args()
     typ  = a.action
+
 
 
     # If the first dir argument is a integer, we treat it as the
