@@ -18,16 +18,16 @@ Positional arguments::
     Archive     The tarsnap archive prefix
     type        Backup type; one of 'hourly', 'daily', 'weekly' or 'monthly'
     Dir         One or more directories to backup
-    Max-Sets    An integer argument denoting the maximum number of
-                previous backups to retain.
+    Max-Sets    An integer argument denoting the maximum number of previous
+                backups to retain.
 
 If ``Max-Sets`` is not provided, the program uses the following
 defaults:
 
-    - Hourly:  24 
-    - Daily:   10
-    - Weekly:   6
-    - Monthly: 14
+- Hourly:  24 
+- Daily:   10
+- Weekly:   6
+- Monthly: 14
 
 If you have a directory name that can be interpreted as an
 integer and thus confused for "Max-Sets", you can disambiguate by
@@ -91,4 +91,4 @@ FAQ
     And no, I don't use hourly backups.
 
 
-
+.. vim:ft=rst:notextmode:expandtab:tw=74:sw=4:ts=4:
