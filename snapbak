@@ -13,17 +13,16 @@
 # License: GPLv2
 #
 
-import os, sys
-import os.path, datetime
+import os, sys, os.path, datetime
 import argparse, subprocess
-from dateutil import parser
-from os.path  import basename
+from   dateutil import parser
+from   os.path  import basename
 
 Z        = basename(sys.argv[0])
 Tarsnap  = "tarsnap"
 Dryrun   = False
 Verbose  = False
-Version  = '0.4'
+Version  = '0.5'
 Cachedir = "" # Use whatever default Tarsnap uses
 __doc__  = """%s - Do a tarsnap backup of one or more directories""" % Z
 Epilog   = """Examples:
@@ -44,7 +43,7 @@ is the directory name.
 """ % (Z, Z)
 
 # Default # of sets to keep for each backup type.
-Max     = { 'hourly': 24,
+Maxsets = { 'hourly': 24,
             'daily': 10,
             'weekly': 6,
             'monthly': 14,
@@ -104,7 +103,11 @@ class tarsnap:
         return l[0].strip()
 
     def list_archives(self, pref=None):
-        """List archives starting with 'pref'"""
+        """List archives starting with 'pref'
+
+        Return a sorted list of archive names - arranged newest to
+        oldest.
+        """
 
         l = self.run(["--list-archives", "-v"])
         a = []
@@ -167,7 +170,7 @@ def main():
     tsv = xts.version()
     ver = "%s v%s [%s]" % (Z, Version, tsv)
 
-    usage = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
+    usage  = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
     parser = argparse.ArgumentParser(description=__doc__, usage=usage,
                             epilog=Epilog,
                             formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -204,7 +207,7 @@ def main():
         keep = k
         dirs = a.dirs[1:]
     except:
-        dirs = a.dirs
+        dirs = a.dirs[1:] if a.dirs[0] == "-" else a.dirs
 
     if len(dirs) == 0:
         die("Missing directories to backup")
@@ -216,7 +219,7 @@ def main():
         if not os.path.isdir(a.cachedir):
             os.makedirs(a.cachedir, 0700)
 
-    if keep == 0: keep = Max[typ]
+    if keep == 0: keep = Maxsets[typ]
 
     key  = a.keyfile[0]
     ts   = tarsnap(key, a.cachedir, a.verbose)
@@ -231,12 +234,10 @@ def main():
 
     # Now, we keep the last N backups and delete the rest
     if len(l) >= keep:
-        rm = [ x[0] for x in l[keep:] ]
-        rms = ', '.join(rm)
-        #print "# RM %s" % rms
+        rm  = [ x[0] for x in l[keep:] ]
+        #rms = ', '.join(rm)
         ts.delete_archives(rm)
 
-    #print "# Now doing tarsnap backup"
     # Now, do the backup
     ts.backup(arch, dirs)
     
