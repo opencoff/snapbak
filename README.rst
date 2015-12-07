@@ -8,7 +8,22 @@ Brief Description
 
 .. _tarsnap: http://tarsnap.com/
 
-Usage::
+Requirements
+------------
+* Python 2.7.x (on any supported platform)
+* Tested on:
+    - Debian Linux amd64 (testing, unstable)
+    - OpenBSD 5.7, 5.8 - amd64, i386
+    - OS X Mavericks, OS X Yosemite
+
+Installation
+------------
+Copy the ``snapbak`` script to your preferred location in ``$PATH``. I put
+this in ``$HOME/bin``.
+
+Usage
+-----
+Brief usage::
 
     snapbak Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]
 
