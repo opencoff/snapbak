@@ -93,7 +93,7 @@ class tarsnap:
         verbose("# %s", cmd)
         try:
             z = subprocess.check_output(args)
-        except Exception, ex:
+        except Exception as ex:
             die("%s failed\n%s", cmd, str(ex))
 
         return z.split('\n')
@@ -217,7 +217,7 @@ def main():
 
     if len(a.cachedir) > 0:
         if not os.path.isdir(a.cachedir):
-            os.makedirs(a.cachedir, 0700)
+            os.makedirs(a.cachedir, 0o700)
 
     if keep == 0: keep = Maxsets[typ]
 
