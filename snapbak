@@ -96,6 +96,7 @@ class tarsnap:
         except Exception as ex:
             die("%s failed\n%s", cmd, str(ex))
 
+        z = z.decode('utf-8')
         return z.split('\n')
 
     def version(self):
@@ -113,7 +114,6 @@ class tarsnap:
         a = []
         for e in l:
             if len(e) == 0: continue
-            #print "# [L] %s" % e
             v = e.split()
             if len(v) != 3:
                 warn("Archive entry '%s' has no timestamp!", e)
