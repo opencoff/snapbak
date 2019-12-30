@@ -15,14 +15,13 @@
 
 import os, sys, os.path, datetime
 import argparse, subprocess
-from   dateutil import parser
 from   os.path  import basename
 
 Z        = basename(sys.argv[0])
 Tarsnap  = "tarsnap"
 Dryrun   = False
 Verbose  = False
-Version  = '0.5'
+Version  = '0.6'
 Cachedir = "" # Use whatever default Tarsnap uses
 __doc__  = """%s - Do a tarsnap backup of one or more directories""" % Z
 Epilog   = """Examples:
@@ -49,6 +48,85 @@ Maxsets = { 'hourly': 24,
             'monthly': 14,
           }
 
+
+def main():
+    global Verbose, Dryrun, Epilog, Version, Z
+
+    xts = tarsnap("", "", False)
+    tsv = xts.version()
+    ver = "%s v%s [%s]" % (Z, Version, tsv)
+
+    usage  = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
+    pp = argparse.ArgumentParser(description=__doc__, usage=usage,
+                            epilog=Epilog,
+                            formatter_class=argparse.RawDescriptionHelpFormatter)
+    pp.add_argument("-n", "--dry-run", dest='dryrun', action="store_true",
+                      default=False,
+                      help="Do a dry-run, don't actually commit things [False]")
+    pp.add_argument("-v", "--verbose", dest='verbose', action="store_true",
+                      default=False,
+                      help="Show verbose progress messages [False]")
+    pp.add_argument("-c", "--cachedir", dest='cachedir', default="", metavar='D',
+                        help="Use 'D' as the tarsnap cache dir []")
+    pp.add_argument("-V",  action="version", version=ver)
+
+
+    pp.add_argument("keyfile", nargs=1, metavar="Keyfile", help="Tarsnap keyfile")
+    pp.add_argument("archive", nargs=1, metavar="Archive", help="The tarsnap archive prefix")
+    pp.add_argument("action",  choices=['hourly', 'daily', 'weekly', 'monthly'],
+                        metavar="type",
+                         help="Backup type; one of 'hourly', 'daily', 'weekly' or 'monthly'")
+
+    pp.add_argument("dirs", nargs="+", metavar="Dir", help="One or more directories to backup")
+
+    # Number of sets to keep
+    keep = 0
+    a    = pp.parse_args()
+    typ  = a.action
+
+
+
+    # If the first dir argument is a integer, we treat it as the
+    # number of backup sets to keep.
+    try:
+        k = int(a.dirs[0])
+        keep = k
+        dirs = a.dirs[1:]
+    except:
+        dirs = a.dirs[1:] if a.dirs[0] == "-" else a.dirs
+
+    if len(dirs) == 0:
+        die("Missing directories to backup")
+
+    Dryrun  = a.dryrun
+    Verbose = True if Dryrun else a.verbose
+
+    if len(a.cachedir) > 0:
+        if not os.path.isdir(a.cachedir):
+            os.makedirs(a.cachedir, 0o700)
+
+    if keep == 0: keep = Maxsets[typ]
+
+    key  = a.keyfile[0]
+    ts   = tarsnap(key, a.cachedir, a.verbose)
+    arch = "%s-%s" % (a.archive[0], typ)
+        
+    #print "typ=%s keeping %d sets, verbose=%s, dryrun=%s" % (typ, keep, Verbose, Dryrun)
+
+    verbose("tarsnap %s %sbackup of '%s' [keeping latest %d sets]",
+            typ, "Dryrun-" if Dryrun else "", a.archive[0], keep)
+
+    l = ts.list_archives(arch)
+
+    # Now, we keep the last N backups and delete the rest
+    if len(l) >= keep:
+        rm  = [ x[0] for x in l[keep:] ]
+        #rms = ', '.join(rm)
+        ts.delete_archives(rm)
+
+    # Now, do the backup
+    ts.backup(arch, dirs)
+    
 def warn(fmt, *args):
     s = "%s: %s" % (Z, fmt)
     if args:                 s  = s % args
@@ -120,7 +198,7 @@ class tarsnap:
                 continue
 
             z = v[1] + ' ' + v[2]
-            d = parser.parse(z)
+            d = parsedate(v[1], v[2])
             n = v[0]
             t = (n, d)
             if pref:
@@ -163,84 +241,27 @@ class tarsnap:
         self.run(args)
 
 
-def main():
-    global Verbose, Dryrun, Epilog, Version, Z
+def parsedate(d, t):
+    """parse a tarsnap date/time tuple and return a datetime
+    object.
 
-    xts = tarsnap("", "", False)
-    tsv = xts.version()
-    ver = "%s v%s [%s]" % (Z, Version, tsv)
+    Date is in the form: YYYY-MM-DD
+    Time is in the form: MM:HH:SS
+    """
 
-    usage  = "%s Keyfile Archive hourly|daily|weekly|monthly [Max-Sets] Dir [Dir ...]" % Z
-    parser = argparse.ArgumentParser(description=__doc__, usage=usage,
-                            epilog=Epilog,
-                            formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("-n", "--dry-run", dest='dryrun', action="store_true",
-                      default=False,
-                      help="Do a dry-run, don't actually commit things [False]")
-    parser.add_argument("-v", "--verbose", dest='verbose', action="store_true",
-                      default=False,
-                      help="Show verbose progress messages [False]")
-    parser.add_argument("-c", "--cachedir", dest='cachedir', default="", metavar='D',
-                        help="Use 'D' as the tarsnap cache dir []")
-    parser.add_argument("-V",  action="version", version=ver)
+    v = d.split('-')
+    if len(v) != 3:
+        die("tarsnap date %s is not in YYYY-MM-DD format", d)
 
 
-    parser.add_argument("keyfile", nargs=1, metavar="Keyfile", help="Tarsnap keyfile")
-    parser.add_argument("archive", nargs=1, metavar="Archive", help="The tarsnap archive prefix")
-    parser.add_argument("action",  choices=['hourly', 'daily', 'weekly', 'monthly'],
-                        metavar="type",
-                         help="Backup type; one of 'hourly', 'daily', 'weekly' or 'monthly'")
+    w = t.split(':')
+    if len(w) != 3:
+        die("tarsnap time %s is not in hh:mm:ss format", t)
 
-    parser.add_argument("dirs", nargs="+", metavar="Dir", help="One or more directories to backup")
-
-    # Number of sets to keep
-    keep = 0
-    a    = parser.parse_args()
-    typ  = a.action
-
-
-
-    # If the first dir argument is a integer, we treat it as the
-    # number of backup sets to keep.
-    try:
-        k = int(a.dirs[0])
-        keep = k
-        dirs = a.dirs[1:]
-    except:
-        dirs = a.dirs[1:] if a.dirs[0] == "-" else a.dirs
-
-    if len(dirs) == 0:
-        die("Missing directories to backup")
-
-    Dryrun  = a.dryrun
-    Verbose = True if Dryrun else a.verbose
-
-    if len(a.cachedir) > 0:
-        if not os.path.isdir(a.cachedir):
-            os.makedirs(a.cachedir, 0o700)
-
-    if keep == 0: keep = Maxsets[typ]
-
-    key  = a.keyfile[0]
-    ts   = tarsnap(key, a.cachedir, a.verbose)
-    arch = "%s-%s" % (a.archive[0], typ)
-        
-    #print "typ=%s keeping %d sets, verbose=%s, dryrun=%s" % (typ, keep, Verbose, Dryrun)
-
-    verbose("tarsnap %s %sbackup of '%s' [keeping latest %d sets]",
-            typ, "Dryrun-" if Dryrun else "", a.archive[0], keep)
-
-    l = ts.list_archives(arch)
-
-    # Now, we keep the last N backups and delete the rest
-    if len(l) >= keep:
-        rm  = [ x[0] for x in l[keep:] ]
-        #rms = ', '.join(rm)
-        ts.delete_archives(rm)
-
-    # Now, do the backup
-    ts.backup(arch, dirs)
-    
+    v = [ int(a) for a in v ]
+    w = [ int(a) for a in w ]
+    tm = datetime.datetime(v[0], v[1], v[2], w[0], w[1], w[2])
+    return tm
 
 main()
 
